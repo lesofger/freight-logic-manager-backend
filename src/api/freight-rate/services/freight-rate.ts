@@ -21,6 +21,20 @@ interface RateCalculationInput {
   warehouseId?: string;
 }
 
+interface DistanceClassRecord {
+  id: string | number;
+  minDistance: number;
+  maxDistance: number;
+  distanceClass: string;
+}
+
+interface FreightClassRecord {
+  id: string | number;
+  freightClass: string | number;
+  minDensity: number;
+  maxDensity: number;
+}
+
 interface RateCalculationResult {
   density: number;
   freightClass: string | number;
@@ -64,7 +78,7 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
    */
   async mapDensityToFreightClass(
     density: number
-  ): Promise<{ freightClass: string | number; record: any }> {
+  ): Promise<{ freightClass: string | number; record: FreightClassRecord }> {
     const freightClasses = await strapi
       .service('api::freight-classe.freight-classe')
       .find({ filters: { minDensity: { $lte: density }, maxDensity: { $gte: density } } });
@@ -103,7 +117,7 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
   /**
    * Find distance class for estimated distance
    */
-  async findDistanceClass(distance: number): Promise<any> {
+  async findDistanceClass(distance: number): Promise<DistanceClassRecord> {
     const distanceClasses = await strapi
       .service('api::distance-class.distance-class')
       .find({
@@ -174,8 +188,8 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
 
       // Step 5: Get applicable rates based on both freight class AND distance class
       const applicableRates = await this.getApplicableRates(
-        freightClassRecord.id,
-        distanceClass.id
+        String(freightClassRecord.id),
+        String(distanceClass.id)
       );
       strapi.log.info(`[Freight Rate] Found ${applicableRates.length} applicable rates`);
 
