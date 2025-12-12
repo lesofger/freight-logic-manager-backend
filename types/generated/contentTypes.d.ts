@@ -492,50 +492,6 @@ export interface ApiFreightClasseFreightClasse
   };
 }
 
-export interface ApiFreightRateFreightRate extends Struct.CollectionTypeSchema {
-  collectionName: 'freight_rates';
-  info: {
-    displayName: 'Freight Rate';
-    pluralName: 'freight-rates';
-    singularName: 'freight-rate';
-  };
-  options: {
-    draftAndPublish: false;
-    increments: true;
-    timestamps: true;
-  };
-  attributes: {
-    applicableRates: Schema.Attribute.JSON;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    density: Schema.Attribute.Decimal;
-    destinationPostalCode: Schema.Attribute.String & Schema.Attribute.Required;
-    distance: Schema.Attribute.Integer;
-    freightClass: Schema.Attribute.Relation<
-      'manyToOne',
-      'api::freight-classe.freight-classe'
-    >;
-    items: Schema.Attribute.JSON;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::freight-rate.freight-rate'
-    > &
-      Schema.Attribute.Private;
-    originPostalCode: Schema.Attribute.String & Schema.Attribute.Required;
-    publishedAt: Schema.Attribute.DateTime;
-    selectedRate: Schema.Attribute.Decimal;
-    status: Schema.Attribute.Enumeration<['pending', 'calculated', 'error']> &
-      Schema.Attribute.DefaultTo<'pending'>;
-    totalVolume: Schema.Attribute.Decimal;
-    totalWeight: Schema.Attribute.Decimal & Schema.Attribute.Required;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiPriceTablePriceTable extends Struct.CollectionTypeSchema {
   collectionName: 'price_tables';
   info: {
@@ -1113,7 +1069,6 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::distance-class.distance-class': ApiDistanceClassDistanceClass;
       'api::freight-classe.freight-classe': ApiFreightClasseFreightClasse;
-      'api::freight-rate.freight-rate': ApiFreightRateFreightRate;
       'api::price-table.price-table': ApiPriceTablePriceTable;
       'api::warehouse.warehouse': ApiWarehouseWarehouse;
       'plugin::content-releases.release': PluginContentReleasesRelease;

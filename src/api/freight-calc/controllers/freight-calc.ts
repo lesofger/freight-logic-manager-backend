@@ -1,4 +1,7 @@
-import { factories } from '@strapi/strapi';
+/**
+ * Custom controller for freight-calc API
+ * This controller does not use a content type - it's purely for calculations
+ */
 
 function estimatePostalCodeDistance(postal1: string, postal2: string): number {
   const combinedCode = `${postal1}${postal2}`;
@@ -8,10 +11,10 @@ function estimatePostalCodeDistance(postal1: string, postal2: string): number {
   return (hash % 4900) + 100; // 100-5000 km
 }
 
-export default factories.createCoreController('api::freight-rate.freight-rate', {
+export default {
   /**
    * Calculate freight rate for items
-   * POST /api/freight-rates/calculate
+   * POST /api/freight-calc/calculate
    * Body: {
    *   items: [{ 
    *     weight (g), 
@@ -46,7 +49,6 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
 
       let warehousePostalCode: string | null = null;
       let selectedWarehouseId: string | null = null;
-
       let distance: number = 0;
 
       if (warehouseId) {
@@ -56,12 +58,12 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
             warehousePostalCode = warehouse.zipcode;
             selectedWarehouseId = warehouseId;
             distance = estimatePostalCodeDistance(warehouse.zipcode, destinationPostalCode);
-            strapi.log.info(`[Freight Rate] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}`);
+            strapi.log.info(`[Freight Calc] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}`);
           } else {
             throw new Error(`Warehouse ${warehouseId} not found or has no zipcode`);
           }
         } catch (err) {
-          strapi.log.error(`[Freight Rate] Error finding warehouse ${warehouseId}: ${err.message}`);
+          strapi.log.error(`[Freight Calc] Error finding warehouse ${warehouseId}: ${err.message}`);
           return ctx.badRequest(`Warehouse ${warehouseId} not found`);
         }
       } else {
@@ -72,7 +74,7 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
 
           if (!warehouses || warehouses.length === 0) {
             if (originPostalCode) {
-              strapi.log.warn('[Freight Rate] No warehouses found, falling back to originPostalCode');
+              strapi.log.warn('[Freight Calc] No warehouses found, falling back to originPostalCode');
               warehousePostalCode = originPostalCode;
             } else {
               return ctx.badRequest('No warehouses found and originPostalCode not provided');
@@ -93,13 +95,13 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
             warehousePostalCode = closestWarehouse.zipcode;
             selectedWarehouseId = String(closestWarehouse.id);
             strapi.log.info(
-              `[Freight Rate] Found closest warehouse ${closestWarehouse.id} (${closestWarehouse.name}) with distance ${closestDistance}km`
+              `[Freight Calc] Found closest warehouse ${closestWarehouse.id} (${closestWarehouse.name}) with distance ${closestDistance}km`
             );
           }
         } catch (err) {
-          strapi.log.error(`[Freight Rate] Error finding warehouses: ${err.message}`);
+          strapi.log.error(`[Freight Calc] Error finding warehouses: ${err.message}`);
           if (originPostalCode) {
-            strapi.log.warn('[Freight Rate] Falling back to originPostalCode');
+            strapi.log.warn('[Freight Calc] Falling back to originPostalCode');
             warehousePostalCode = originPostalCode;
           } else {
             return ctx.internalServerError('Failed to determine warehouse location');
@@ -111,64 +113,25 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
         return ctx.badRequest('Could not determine origin postal code');
       }
 
-      const freightRateService = strapi.service('api::freight-rate.freight-rate');
-      const result = await freightRateService.calculateRate({
+      // Use the freight-calc service
+      const freightCalcService = strapi.service('api::freight-calc.freight-calc');
+      const result = await freightCalcService.calculateRate({
         items,
         distance,
       });
-      strapi.log.info(`[Freight Rate] result: ${JSON.stringify(result)}`);
-
-      // const rateRecord = await strapi.entityService.create('api::freight-rate.freight-rate', {
-      //   data: {
-      //     originPostalCode: warehousePostalCode,
-      //     destinationPostalCode,
-      //     totalWeight: items.reduce((sum, item) => sum + item.weight * item.quantity, 0),
-      //     totalVolume: items.reduce(
-      //       (sum, item) => sum + item.length * item.width * item.height * item.quantity,
-      //       0
-      //     ),
-      //     density: result.density,
-      //     freightClass: result.freightClass,
-      //     items,
-      //     applicableRates: result.applicableRates,
-      //     selectedRate: result.lowestRate,
-      //     distance: result.distance,
-      //     status: 'calculated',
-      //   },
-      // });
+      strapi.log.info(`[Freight Calc] result: ${JSON.stringify(result)}`);
 
       return {
         data: {
-          // id: rateRecord.id,
           ...result,
-          // freightRateId: rateRecord.id,
           selectedWarehouseId,
           originPostalCode: warehousePostalCode,
         },
       };
     } catch (error) {
-      strapi.log.error(`[Freight Rate Controller] Error: ${error.message}`);
+      strapi.log.error(`[Freight Calc Controller] Error: ${error.message}`);
       return ctx.internalServerError(`Rate calculation failed: ${error.message}`);
     }
   },
+};
 
-  /**
-   * Get rate history
-   * GET /api/freight-rates/history
-   */
-  async history(ctx) {
-    try {
-      const rates = await strapi.entityService.findMany('api::freight-rate.freight-rate', {
-        limit: 100,
-        sort: { createdAt: 'desc' },
-      });
-
-      return {
-        data: rates,
-      };
-    } catch (error) {
-      strapi.log.error(`[Freight Rate Controller] Error fetching history: ${error.message}`);
-      return ctx.internalServerError(`Failed to fetch history: ${error.message}`);
-    }
-  },
-});

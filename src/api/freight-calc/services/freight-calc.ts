@@ -1,8 +1,7 @@
 /**
- * freight-rate service
+ * freight-calc service
+ * Custom service without content type - purely for calculations
  */
-
-import { factories } from '@strapi/strapi';
 
 interface CartItem {
   id: string;
@@ -42,7 +41,7 @@ interface RateCalculationResult {
   distance: number;
 }
 
-export default factories.createCoreService('api::freight-rate.freight-rate', {
+export default {
   /**
    * Calculate density of items (weight per volume)
    * Density = weight(lbs) / volume(cubic inches)
@@ -149,22 +148,22 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
       }
 
       const density = await this.calculateDensity(input.items);
-      strapi.log.info(`[Freight Rate] Calculated density: ${density}`);
+      strapi.log.info(`[Freight Calc] Calculated density: ${density}`);
 
       const { freightClass, record: freightClassRecord } = await this.mapDensityToFreightClass(density);
-      strapi.log.info(`[Freight Rate] Mapped to freight class: ${freightClass}`);
+      strapi.log.info(`[Freight Calc] Mapped to freight class: ${freightClass}`);
 
       const distance = input.distance;
-      strapi.log.info(`[Freight Rate] Using distance: ${distance} km`);
+      strapi.log.info(`[Freight Calc] Using distance: ${distance} km`);
 
       const distanceClass = await this.findDistanceClass(distance);
-      strapi.log.info(`[Freight Rate] Mapped to distance class: ${distanceClass.distanceClass}`);
+      strapi.log.info(`[Freight Calc] Mapped to distance class: ${distanceClass.distanceClass}`);
 
       const applicableRates = await this.getApplicableRates(
         String(freightClassRecord.id),
         String(distanceClass.id)
       );
-      strapi.log.info(`[Freight Rate] Found ${applicableRates.length} applicable rates`);
+      strapi.log.info(`[Freight Calc] Found ${applicableRates.length} applicable rates`);
 
       if (applicableRates.length === 0) {
         throw new Error(
@@ -187,8 +186,8 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
 
       const finalPrice = Math.floor(totalPrice * 1.15);
 
-      strapi.log.info(`[Freight Rate] price100lbs: ${basePrice} cents`);
-      strapi.log.info(`[Freight Rate] Final calculated price: ${finalPrice} cents`);
+      strapi.log.info(`[Freight Calc] price100lbs: ${basePrice} cents`);
+      strapi.log.info(`[Freight Calc] Final calculated price: ${finalPrice} cents`);
 
       return {
         density,
@@ -201,8 +200,9 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
         distance,
       };
     } catch (error) {
-      strapi.log.error(`[Freight Rate] Error calculating rate: ${error.message}`);
+      strapi.log.error(`[Freight Calc] Error calculating rate: ${error.message}`);
       throw error;
     }
   },
-});
+};
+
