@@ -1,0 +1,29 @@
+{
+  "kind": "collectionType",
+  "collectionName": "price_tables",
+  "info": {
+    "singularName": "price-table",
+    "pluralName": "price-tables",
+    "displayName": "Price Table"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "freightClass": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::freight-classe.freight-classe"
+    },
+    "distanceMin": {
+      "type": "decimal"
+    },
+    "distanceMax": {
+      "type": "decimal"
+    },
+    "pricePer100lbs": {
+      "type": "decimal"
+    }
+  }
+}
