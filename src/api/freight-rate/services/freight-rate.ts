@@ -187,6 +187,7 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
 
       const finalPrice = Math.floor(totalPrice * 1.15);
 
+      strapi.log.info(`[Freight Rate] price100lbs: ${basePrice} cents`);
       strapi.log.info(`[Freight Rate] Final calculated price: ${finalPrice} cents`);
 
       return {

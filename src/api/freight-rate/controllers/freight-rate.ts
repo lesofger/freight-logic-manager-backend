@@ -116,31 +116,32 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
         items,
         distance,
       });
+      strapi.log.info(`[Freight Rate] result: ${JSON.stringify(result)}`);
 
-      const rateRecord = await strapi.entityService.create('api::freight-rate.freight-rate', {
-        data: {
-          originPostalCode: warehousePostalCode,
-          destinationPostalCode,
-          totalWeight: items.reduce((sum, item) => sum + item.weight * item.quantity, 0),
-          totalVolume: items.reduce(
-            (sum, item) => sum + item.length * item.width * item.height * item.quantity,
-            0
-          ),
-          density: result.density,
-          freightClass: result.freightClass,
-          items,
-          applicableRates: result.applicableRates,
-          selectedRate: result.lowestRate,
-          distance: result.distance,
-          status: 'calculated',
-        },
-      });
+      // const rateRecord = await strapi.entityService.create('api::freight-rate.freight-rate', {
+      //   data: {
+      //     originPostalCode: warehousePostalCode,
+      //     destinationPostalCode,
+      //     totalWeight: items.reduce((sum, item) => sum + item.weight * item.quantity, 0),
+      //     totalVolume: items.reduce(
+      //       (sum, item) => sum + item.length * item.width * item.height * item.quantity,
+      //       0
+      //     ),
+      //     density: result.density,
+      //     freightClass: result.freightClass,
+      //     items,
+      //     applicableRates: result.applicableRates,
+      //     selectedRate: result.lowestRate,
+      //     distance: result.distance,
+      //     status: 'calculated',
+      //   },
+      // });
 
       return {
         data: {
-          id: rateRecord.id,
+          // id: rateRecord.id,
           ...result,
-          freightRateId: rateRecord.id,
+          // freightRateId: rateRecord.id,
           selectedWarehouseId,
           originPostalCode: warehousePostalCode,
         },
