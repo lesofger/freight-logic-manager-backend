@@ -16,8 +16,7 @@ interface CartItem {
 
 interface RateCalculationInput {
   items: CartItem[];
-  originPostalCode: string;
-  destinationPostalCode: string;
+  distance: number; // distance in km
   warehouseId?: string;
 }
 
@@ -73,9 +72,6 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
     return Math.round(density * 100) / 100;
   },
 
-  /**
-   * Map density to freight class
-   */
   async mapDensityToFreightClass(
     density: number
   ): Promise<{ freightClass: string | number; record: FreightClassRecord }> {
@@ -94,10 +90,6 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
     };
   },
 
-  /**
-   * Estimate distance between two postal codes
-   * This is a simplified estimation - in production you'd use a real API
-   */
   async estimateDistance(
     originPostalCode: string,
     destinationPostalCode: string
@@ -109,14 +101,10 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
       return acc + char.charCodeAt(0);
     }, 0);
 
-    // Estimate between 100-5000 km based on hash
     const distance = ((hash % 4900) + 100);
     return distance;
   },
 
-  /**
-   * Find distance class for estimated distance
-   */
   async findDistanceClass(distance: number): Promise<DistanceClassRecord> {
     const distanceClasses = await strapi
       .service('api::distance-class.distance-class')
@@ -134,9 +122,6 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
     return distanceClasses.results[0];
   },
 
-  /**
-   * Get applicable rates from price table based on freight class AND distance class
-   */
   async getApplicableRates(
     freightClassId: string,
     distanceClassId: string
@@ -153,40 +138,28 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
     return rates.results || [];
   },
 
-  /**
-   * Calculate freight rate for given cart/shipment
-   */
   async calculateRate(input: RateCalculationInput): Promise<RateCalculationResult> {
     try {
-      // Validate input
       if (!input.items || input.items.length === 0) {
         throw new Error('No items provided for rate calculation');
       }
 
-      if (!input.originPostalCode || !input.destinationPostalCode) {
-        throw new Error('Origin and destination postal codes are required');
+      if (input.distance === undefined || input.distance === null || input.distance < 0) {
+        throw new Error('Distance is required and must be a positive number');
       }
 
-      // Step 1: Calculate density
       const density = await this.calculateDensity(input.items);
       strapi.log.info(`[Freight Rate] Calculated density: ${density}`);
 
-      // Step 2: Map density to freight class
       const { freightClass, record: freightClassRecord } = await this.mapDensityToFreightClass(density);
       strapi.log.info(`[Freight Rate] Mapped to freight class: ${freightClass}`);
 
-      // Step 3: Estimate distance
-      const distance = await this.estimateDistance(
-        input.originPostalCode,
-        input.destinationPostalCode
-      );
-      strapi.log.info(`[Freight Rate] Estimated distance: ${distance} km`);
+      const distance = input.distance;
+      strapi.log.info(`[Freight Rate] Using distance: ${distance} km`);
 
-      // Step 4: Find distance class for the estimated distance
       const distanceClass = await this.findDistanceClass(distance);
       strapi.log.info(`[Freight Rate] Mapped to distance class: ${distanceClass.distanceClass}`);
 
-      // Step 5: Get applicable rates based on both freight class AND distance class
       const applicableRates = await this.getApplicableRates(
         String(freightClassRecord.id),
         String(distanceClass.id)
@@ -199,23 +172,19 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
         );
       }
 
-      // Step 6: Get lowest rate (first result is usually lowest)
       const lowestRate = applicableRates[0];
       const basePrice = Number(lowestRate.pricePer100lbs);
 
-      // Calculate total price based on weight
       let totalWeightLbs = 0;
       for (const item of input.items) {
         const weightLbs = (item.weight * item.quantity) / 453.592;
         totalWeightLbs += weightLbs;
       }
 
-      // Price per 100 lbs
       const price100lbs = basePrice;
       const units100lbs = Math.ceil(totalWeightLbs / 100);
       const totalPrice = price100lbs * units100lbs;
 
-      // Add 15% markup (as per the freightcom code)
       const finalPrice = Math.floor(totalPrice * 1.15);
 
       strapi.log.info(`[Freight Rate] Final calculated price: ${finalPrice} cents`);

@@ -47,12 +47,15 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
       let warehousePostalCode: string | null = null;
       let selectedWarehouseId: string | null = null;
 
+      let distance: number = 0;
+
       if (warehouseId) {
         try {
           const warehouse = await strapi.entityService.findOne('api::warehouse.warehouse', warehouseId);
           if (warehouse && warehouse.zipcode) {
             warehousePostalCode = warehouse.zipcode;
             selectedWarehouseId = warehouseId;
+            distance = estimatePostalCodeDistance(warehouse.zipcode, destinationPostalCode);
             strapi.log.info(`[Freight Rate] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}`);
           } else {
             throw new Error(`Warehouse ${warehouseId} not found or has no zipcode`);
@@ -86,6 +89,7 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
               }
             }
 
+            distance = closestDistance;
             warehousePostalCode = closestWarehouse.zipcode;
             selectedWarehouseId = String(closestWarehouse.id);
             strapi.log.info(
@@ -110,9 +114,7 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
       const freightRateService = strapi.service('api::freight-rate.freight-rate');
       const result = await freightRateService.calculateRate({
         items,
-        originPostalCode: warehousePostalCode,
-        destinationPostalCode,
-        warehouseId: selectedWarehouseId,
+        distance,
       });
 
       const rateRecord = await strapi.entityService.create('api::freight-rate.freight-rate', {
