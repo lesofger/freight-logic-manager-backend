@@ -28,17 +28,17 @@ Calculates the freight rate for a shipment based on items and postal codes.
 {
   "items": [
     {
-      "productId": "string (required)",
       "weight": "number (required) - in grams",
       "length": "number (required) - in millimeters",
       "width": "number (required) - in millimeters",
       "height": "number (required) - in millimeters",
-      "quantity": "number (required)"
+      "quantity": "number (required)",
+      "productId": "string (optional) - for reference only"
     }
   ],
-  "originPostalCode": "string (required)",
   "destinationPostalCode": "string (required)",
-  "warehouseId": "string (optional) - will override originPostalCode with warehouse's zipcode"
+  "warehouseId": "string (optional) - specific warehouse to use for origin",
+  "originPostalCode": "string (optional) - fallback if no warehouses found"
 }
 ```
 
@@ -47,15 +47,15 @@ Calculates the freight rate for a shipment based on items and postal codes.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `items` | Array | Yes | Array of line items with dimensions |
-| `items[].productId` | string | Yes | Product identifier |
 | `items[].weight` | number | Yes | Weight in **grams** (g) |
 | `items[].length` | number | Yes | Length in **millimeters** (mm) |
 | `items[].width` | number | Yes | Width in **millimeters** (mm) |
 | `items[].height` | number | Yes | Height in **millimeters** (mm) |
 | `items[].quantity` | number | Yes | Number of units |
-| `originPostalCode` | string | Yes | Departure postal code (CA format) |
+| `items[].productId` | string | No | Product identifier (for reference/logging only) |
 | `destinationPostalCode` | string | Yes | Destination postal code (CA format) |
-| `warehouseId` | string | No | Warehouse ID to use postal code instead of originPostalCode |
+| `warehouseId` | string | No | Specific warehouse ID to use as origin. If not provided, closest warehouse is auto-selected |
+| `originPostalCode` | string | No | Fallback origin postal code if no warehouses found |
 
 #### Success Response (200 OK)
 
@@ -64,6 +64,8 @@ Calculates the freight rate for a shipment based on items and postal codes.
   "data": {
     "id": "1",
     "freightRateId": "1",
+    "selectedWarehouseId": "warehouse-001",
+    "originPostalCode": "H2K 4P5",
     "density": 12.45,
     "freightClass": "85",
     "applicableRates": [
@@ -84,62 +86,79 @@ Calculates the freight rate for a shipment based on items and postal codes.
 |-------|------|-------------|
 | `id` | string | Rate record ID in database |
 | `freightRateId` | string | Same as `id` |
+| `selectedWarehouseId` | string | ID of warehouse used as origin (auto-selected if not specified) |
+| `originPostalCode` | string | Postal code of selected warehouse |
 | `density` | number | Calculated density (lbs/in³) |
 | `freightClass` | string/number | Freight class determined by density |
 | `applicableRates` | Array | List of available rates for this freight class & distance |
 | `lowestRate` | number | Final calculated price in **cents** (includes 15% markup) |
-| `distance` | number | Estimated distance in km between postal codes |
+| `distance` | number | Estimated distance in km between warehouse and destination |
 
 #### Example Request (cURL)
 
 ```bash
+# Auto-select closest warehouse
 curl -X POST http://localhost:1337/api/freight-rates/calculate \
   -H "Content-Type: application/json" \
   -d '{
     "items": [
       {
-        "productId": "PROD-12345",
+        "weight": 5000,
+        "length": 300,
+        "width": 200,
+        "height": 150,
+        "quantity": 2,
+        "productId": "PROD-12345"
+      }
+    ],
+    "destinationPostalCode": "L0L 1P0"
+  }'
+
+# Or specify a warehouse
+curl -X POST http://localhost:1337/api/freight-rates/calculate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
         "weight": 5000,
         "length": 300,
         "width": 200,
         "height": 150,
         "quantity": 2
-      },
-      {
-        "productId": "PROD-67890",
-        "weight": 3000,
-        "length": 250,
-        "width": 150,
-        "height": 100,
-        "quantity": 1
       }
     ],
-    "originPostalCode": "H2K 4P5",
-    "destinationPostalCode": "L0L 1P0"
+    "destinationPostalCode": "L0L 1P0",
+    "warehouseId": "warehouse-001"
   }'
 ```
 
 #### Example Request (JavaScript/Fetch)
 
 ```javascript
-const calculateFreightRate = async (items, originPostal, destinationPostal) => {
+const calculateFreightRate = async (items, destinationPostal, warehouseId = null) => {
+  const body = {
+    items: items.map(item => ({
+      weight: item.weight,      // in grams
+      length: item.length,       // in mm
+      width: item.width,         // in mm
+      height: item.height,       // in mm
+      quantity: item.quantity,
+      productId: item.id,        // optional, for reference
+    })),
+    destinationPostalCode: destinationPostal,
+  };
+
+  // Only include warehouseId if provided
+  if (warehouseId) {
+    body.warehouseId = warehouseId;
+  }
+
   const response = await fetch('http://localhost:1337/api/freight-rates/calculate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      items: items.map(item => ({
-        productId: item.id,
-        weight: item.weight,      // in grams
-        length: item.length,       // in mm
-        width: item.width,         // in mm
-        height: item.height,       // in mm
-        quantity: item.quantity,
-      })),
-      originPostalCode: originPostal,
-      destinationPostalCode: destinationPostal,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -149,14 +168,27 @@ const calculateFreightRate = async (items, originPostal, destinationPostal) => {
   return response.json();
 };
 
-// Usage
+// Usage - Auto-select closest warehouse
 try {
   const rate = await calculateFreightRate(
     [
       { id: 'PROD-1', weight: 5000, length: 300, width: 200, height: 150, quantity: 2 },
+      { weight: 3000, length: 250, width: 150, height: 100, quantity: 1 },
     ],
-    'H2K 4P5',
-    'L0L 1P0'
+    'L0L 1P0'  // destination postal code
+  );
+  console.log('Warehouse:', rate.data.selectedWarehouseId);
+  console.log('Freight Rate:', rate.data.lowestRate / 100, 'CAD');
+} catch (error) {
+  console.error('Error:', error.message);
+}
+
+// Usage - Use specific warehouse
+try {
+  const rate = await calculateFreightRate(
+    [{ weight: 5000, length: 300, width: 200, height: 150, quantity: 2 }],
+    'L0L 1P0',
+    'warehouse-001'  // specific warehouse ID
   );
   console.log('Freight Rate:', rate.data.lowestRate / 100, 'CAD');
 } catch (error) {
@@ -234,36 +266,43 @@ const getHistoricalRates = async () => {
 // services/freightService.ts
 
 interface CartItem {
-  id: string;
-  weight: number;      // grams
-  length: number;      // mm
-  width: number;       // mm
-  height: number;      // mm
+  id?: string;           // optional, for reference
+  weight: number;        // grams
+  length: number;        // mm
+  width: number;         // mm
+  height: number;        // mm
   quantity: number;
 }
 
 interface FreightRateResult {
-  lowestRate: number;  // cents
+  lowestRate: number;    // cents
   density: number;
   freightClass: string | number;
   distance: number;
+  selectedWarehouseId: string;
+  originPostalCode: string;
 }
 
 export async function calculateShippingCost(
   items: CartItem[],
-  originPostal: string,
-  destPostal: string
+  destPostal: string,
+  warehouseId?: string
 ): Promise<FreightRateResult> {
+  const body: any = {
+    items,
+    destinationPostalCode: destPostal,
+  };
+
+  if (warehouseId) {
+    body.warehouseId = warehouseId;
+  }
+
   const response = await fetch(
     `${process.env.REACT_APP_API_URL}/freight-rates/calculate`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        items,
-        originPostalCode: originPostal,
-        destinationPostalCode: destPostal,
-      }),
+      body: JSON.stringify(body),
     }
   );
 
@@ -281,6 +320,7 @@ import React, { useState } from 'react';
 
 export function ShippingCalculator() {
   const [shippingCost, setShippingCost] = useState<number | null>(null);
+  const [warehouse, setWarehouse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -298,16 +338,23 @@ export function ShippingCalculator() {
           height: 150,     // 15cm in mm
           quantity: 2,
         },
+        {
+          weight: 3000,    // no id needed
+          length: 250,
+          width: 150,
+          height: 100,
+          quantity: 1,
+        },
       ];
 
+      // Auto-select closest warehouse
       const result = await calculateShippingCost(
         cartItems,
-        'H2K 4P5',    // Origin postal
-        'L0L 1P0'     // Destination postal
+        'L0L 1P0'     // Destination postal code
       );
 
-      // Convert cents to dollars
       setShippingCost(result.lowestRate / 100);
+      setWarehouse(result.selectedWarehouseId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -321,7 +368,10 @@ export function ShippingCalculator() {
         {loading ? 'Calculating...' : 'Calculate Shipping'}
       </button>
       {shippingCost !== null && (
-        <p>Shipping Cost: ${shippingCost.toFixed(2)}</p>
+        <div>
+          <p>Shipping Cost: ${shippingCost.toFixed(2)}</p>
+          <p>From Warehouse: {warehouse}</p>
+        </div>
       )}
       {error && <p style={{ color: 'red' }}>{error}</p>}
     </div>

@@ -2,7 +2,7 @@
 
 ## 🚀 Quick Start
 
-### Calculate Shipping Cost
+### Auto-select closest warehouse
 
 ```bash
 curl -X POST http://localhost:1337/api/freight-rates/calculate \
@@ -10,7 +10,6 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
   -d '{
     "items": [
       {
-        "productId": "PROD-123",
         "weight": 5000,
         "length": 300,
         "width": 200,
@@ -18,8 +17,27 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
         "quantity": 2
       }
     ],
-    "originPostalCode": "H2K 4P5",
     "destinationPostalCode": "L0L 1P0"
+  }'
+```
+
+### Or specify a warehouse
+
+```bash
+curl -X POST http://localhost:1337/api/freight-rates/calculate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "weight": 5000,
+        "length": 300,
+        "width": 200,
+        "height": 150,
+        "quantity": 2
+      }
+    ],
+    "destinationPostalCode": "L0L 1P0",
+    "warehouseId": "warehouse-123"
   }'
 ```
 
@@ -27,7 +45,7 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/api/freight-rates/calculate` | Calculate freight rate for items |
+| POST | `/api/freight-rates/calculate` | Calculate freight rate (auto-selects closest warehouse) |
 | GET | `/api/freight-rates/history` | Get last 100 rate calculations |
 
 ## 📦 Request Format
@@ -36,17 +54,17 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
 {
   "items": [
     {
-      "productId": "string",
-      "weight": 5000,      // grams
-      "length": 300,       // mm
-      "width": 200,        // mm
-      "height": 150,       // mm
-      "quantity": 2
+      "weight": 5000,      // grams (required)
+      "length": 300,       // mm (required)
+      "width": 200,        // mm (required)
+      "height": 150,       // mm (required)
+      "quantity": 2,       // required
+      "productId": "PROD-1" // optional
     }
   ],
-  "originPostalCode": "H2K 4P5",
-  "destinationPostalCode": "L0L 1P0",
-  "warehouseId": "optional-warehouse-id"
+  "destinationPostalCode": "L0L 1P0",      // required
+  "warehouseId": "warehouse-123",          // optional
+  "originPostalCode": "H2K 4P5"            // optional fallback
 }
 ```
 
@@ -57,6 +75,8 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
   "data": {
     "id": "1",
     "freightRateId": "1",
+    "selectedWarehouseId": "warehouse-001",
+    "originPostalCode": "H2K 4P5",
     "density": 12.45,
     "freightClass": "85",
     "lowestRate": 5520,     // in cents ($55.20)
@@ -69,19 +89,29 @@ curl -X POST http://localhost:1337/api/freight-rates/calculate \
 ## 🔄 Workflow
 
 ```
-Product Dimensions
-      ↓
-  [Calculate Density]
-      ↓
-  [Map to Freight Class]
-      ↓
-  [Estimate Distance]
-      ↓
-  [Lookup Price Table]
-      ↓
-  [Apply 15% Markup]
-      ↓
-  [Return Final Price]
+Client Request with Destination Postal Code
+           ↓
+   Check if warehouseId provided?
+      ↙           ↘
+    YES            NO
+     ↓              ↓
+Use it      Fetch all warehouses
+     ↓              ↓
+     └──→ Calculate distance to each
+          ↓
+        Select Closest Warehouse
+             ↓
+    [Calculate Density]
+             ↓
+    [Map to Freight Class]
+             ↓
+   [Lookup Distance Class]
+             ↓
+    [Lookup Price Table]
+             ↓
+   [Apply 15% Markup]
+             ↓
+     [Return Final Price]
 ```
 
 ## 💡 Unit Reference
@@ -94,39 +124,62 @@ Product Dimensions
 ## 🛠️ JavaScript Example
 
 ```javascript
-async function getShippingCost(cartItems, fromPostal, toPostal) {
+async function getShippingCost(cartItems, destinationPostal, warehouseId) {
+  const body = {
+    items: cartItems,
+    destinationPostalCode: destinationPostal,
+  };
+  
+  if (warehouseId) body.warehouseId = warehouseId;
+  
   const response = await fetch('http://localhost:1337/api/freight-rates/calculate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      items: cartItems,
-      originPostalCode: fromPostal,
-      destinationPostalCode: toPostal,
-    }),
+    body: JSON.stringify(body),
   });
   
   const { data } = await response.json();
-  return (data.lowestRate / 100).toFixed(2); // Convert cents to dollars
+  return {
+    cost: (data.lowestRate / 100).toFixed(2),
+    warehouse: data.selectedWarehouseId,
+    distance: data.distance,
+  };
 }
 
-// Usage
-const cost = await getShippingCost(
-  [{ productId: 'P1', weight: 5000, length: 300, width: 200, height: 150, quantity: 2 }],
-  'H2K 4P5',
+// Usage - Auto-select warehouse
+const result = await getShippingCost(
+  [{ weight: 5000, length: 300, width: 200, height: 150, quantity: 2 }],
   'L0L 1P0'
 );
-console.log(`Shipping: $${cost}`);
+console.log(`Shipping: $${result.cost} from warehouse ${result.warehouse}`);
+
+// Usage - Specific warehouse
+const result2 = await getShippingCost(
+  [{ weight: 5000, length: 300, width: 200, height: 150, quantity: 2 }],
+  'L0L 1P0',
+  'warehouse-001'
+);
+console.log(`Shipping: $${result2.cost}`);
 ```
 
 ## ⚠️ Common Errors
 
-| Error | Fix |
-|-------|-----|
-| "Items array is required" | Add items array with at least one item |
-| "Each item must have weight..." | Include weight, length, width, height, quantity |
-| "postal codes are required" | Add originPostalCode and destinationPostalCode |
-| "No freight class found" | Check Freight Classes table has matching density ranges |
-| "No rates found" | Check Price Table has entries for the freight class |
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Items array is required" | Missing items | Add items array with at least one item |
+| "Destination postal code is required" | Missing destination | Add destinationPostalCode |
+| "Warehouse X not found" | Invalid warehouseId | Use valid warehouse ID or omit to auto-select |
+| "No warehouses found" | No warehouses in database | Add warehouses or provide originPostalCode fallback |
+| "No freight class found" | Density out of range | Check Freight Classes table |
+| "No rates found" | Missing price entry | Check Price Table has entries |
+
+## 🚀 Key Features
+
+✅ **Auto-selects closest warehouse** - No need to specify origin postal code  
+✅ **Optional warehouse override** - Specify exact warehouse if needed  
+✅ **Integrated density calculation** - Automatically maps to freight classes  
+✅ **Distance-based pricing** - Rates vary by destination distance  
+✅ **Rate history tracking** - All calculations stored in database  
 
 ## 📚 Full Documentation
 

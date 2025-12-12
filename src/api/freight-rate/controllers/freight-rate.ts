@@ -1,63 +1,120 @@
-/**
- * freight-rate controller
- */
-
 import { factories } from '@strapi/strapi';
+
+function estimatePostalCodeDistance(postal1: string, postal2: string): number {
+  const combinedCode = `${postal1}${postal2}`;
+  const hash = combinedCode.split('').reduce((acc, char) => {
+    return acc + char.charCodeAt(0);
+  }, 0);
+  return (hash % 4900) + 100; // 100-5000 km
+}
 
 export default factories.createCoreController('api::freight-rate.freight-rate', {
   /**
    * Calculate freight rate for items
    * POST /api/freight-rates/calculate
    * Body: {
-   *   items: [{ productId, weight (g), length (mm), width (mm), height (mm), quantity }, ...],
-   *   originPostalCode: string,
-   *   destinationPostalCode: string,
-   *   warehouseId?: string (optional, for warehouse location)
+   *   items: [{ 
+   *     weight (g), 
+   *     length (mm), 
+   *     width (mm), 
+   *     height (mm), 
+   *     quantity,
+   *     productId?: string (optional, for reference)
+   *   }, ...],
+   *   destinationPostalCode: string (required),
+   *   warehouseId?: string (optional, use specific warehouse),
+   *   originPostalCode?: string (optional, fallback if warehouse not found)
    * }
    */
   async calculate(ctx) {
     try {
-      const { items, originPostalCode, destinationPostalCode, warehouseId } = ctx.request.body;
+      const { items, destinationPostalCode, warehouseId, originPostalCode } = ctx.request.body;
 
-      // Validate request body
       if (!items || !Array.isArray(items) || items.length === 0) {
         return ctx.badRequest('Items array is required and must not be empty');
       }
 
-      if (!originPostalCode || !destinationPostalCode) {
-        return ctx.badRequest('Origin and destination postal codes are required');
+      if (!destinationPostalCode) {
+        return ctx.badRequest('Destination postal code is required');
       }
 
-      // Validate each item
       for (const item of items) {
         if (!item.weight || !item.length || !item.width || !item.height || !item.quantity) {
           return ctx.badRequest('Each item must have weight, length, width, height, and quantity');
         }
       }
 
-      // Get warehouse postal code if provided
-      let warehousePostalCode = originPostalCode;
+      let warehousePostalCode: string | null = null;
+      let selectedWarehouseId: string | null = null;
+
       if (warehouseId) {
         try {
           const warehouse = await strapi.entityService.findOne('api::warehouse.warehouse', warehouseId);
           if (warehouse && warehouse.zipcode) {
             warehousePostalCode = warehouse.zipcode;
+            selectedWarehouseId = warehouseId;
+            strapi.log.info(`[Freight Rate] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}`);
+          } else {
+            throw new Error(`Warehouse ${warehouseId} not found or has no zipcode`);
           }
         } catch (err) {
-          strapi.log.warn(`Could not find warehouse ${warehouseId}: ${err.message}`);
+          strapi.log.error(`[Freight Rate] Error finding warehouse ${warehouseId}: ${err.message}`);
+          return ctx.badRequest(`Warehouse ${warehouseId} not found`);
+        }
+      } else {
+        try {
+          const warehouses = await strapi.entityService.findMany('api::warehouse.warehouse', {
+            limit: 1000,
+          });
+
+          if (!warehouses || warehouses.length === 0) {
+            if (originPostalCode) {
+              strapi.log.warn('[Freight Rate] No warehouses found, falling back to originPostalCode');
+              warehousePostalCode = originPostalCode;
+            } else {
+              return ctx.badRequest('No warehouses found and originPostalCode not provided');
+            }
+          } else {
+            let closestWarehouse = warehouses[0];
+            let closestDistance = estimatePostalCodeDistance(closestWarehouse.zipcode, destinationPostalCode);
+
+            for (const warehouse of warehouses) {
+              const distance = estimatePostalCodeDistance(warehouse.zipcode, destinationPostalCode);
+              if (distance < closestDistance) {
+                closestDistance = distance;
+                closestWarehouse = warehouse;
+              }
+            }
+
+            warehousePostalCode = closestWarehouse.zipcode;
+            selectedWarehouseId = String(closestWarehouse.id);
+            strapi.log.info(
+              `[Freight Rate] Found closest warehouse ${closestWarehouse.id} (${closestWarehouse.name}) with distance ${closestDistance}km`
+            );
+          }
+        } catch (err) {
+          strapi.log.error(`[Freight Rate] Error finding warehouses: ${err.message}`);
+          if (originPostalCode) {
+            strapi.log.warn('[Freight Rate] Falling back to originPostalCode');
+            warehousePostalCode = originPostalCode;
+          } else {
+            return ctx.internalServerError('Failed to determine warehouse location');
+          }
         }
       }
 
-      // Calculate rate using service
+      if (!warehousePostalCode) {
+        return ctx.badRequest('Could not determine origin postal code');
+      }
+
       const freightRateService = strapi.service('api::freight-rate.freight-rate');
       const result = await freightRateService.calculateRate({
         items,
         originPostalCode: warehousePostalCode,
         destinationPostalCode,
-        warehouseId,
+        warehouseId: selectedWarehouseId,
       });
 
-      // Create record in database
       const rateRecord = await strapi.entityService.create('api::freight-rate.freight-rate', {
         data: {
           originPostalCode: warehousePostalCode,
@@ -82,6 +139,8 @@ export default factories.createCoreController('api::freight-rate.freight-rate', 
           id: rateRecord.id,
           ...result,
           freightRateId: rateRecord.id,
+          selectedWarehouseId,
+          originPostalCode: warehousePostalCode,
         },
       };
     } catch (error) {
