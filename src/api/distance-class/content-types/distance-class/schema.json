@@ -1,0 +1,24 @@
+{
+  "kind": "collectionType",
+  "collectionName": "distance_classes",
+  "info": {
+    "singularName": "distance-class",
+    "pluralName": "distance-classes",
+    "displayName": "Distance Class"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "minDistance": {
+      "type": "integer"
+    },
+    "maxDistance": {
+      "type": "integer"
+    },
+    "distanceClass": {
+      "type": "string"
+    }
+  }
+}

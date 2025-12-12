@@ -16,14 +16,13 @@
       "relation": "oneToOne",
       "target": "api::freight-classe.freight-classe"
     },
-    "distanceMin": {
-      "type": "decimal"
-    },
-    "distanceMax": {
-      "type": "decimal"
-    },
     "pricePer100lbs": {
       "type": "decimal"
+    },
+    "distanceClass": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::distance-class.distance-class"
     }
   }
 }

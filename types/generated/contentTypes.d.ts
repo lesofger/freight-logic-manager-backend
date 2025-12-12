@@ -430,6 +430,37 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiDistanceClassDistanceClass
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'distance_classes';
+  info: {
+    displayName: 'Distance Class';
+    pluralName: 'distance-classes';
+    singularName: 'distance-class';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    distanceClass: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::distance-class.distance-class'
+    > &
+      Schema.Attribute.Private;
+    maxDistance: Schema.Attribute.Integer;
+    minDistance: Schema.Attribute.Integer;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiFreightClasseFreightClasse
   extends Struct.CollectionTypeSchema {
   collectionName: 'freight_classes';
@@ -519,8 +550,10 @@ export interface ApiPriceTablePriceTable extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    distanceMax: Schema.Attribute.Decimal;
-    distanceMin: Schema.Attribute.Decimal;
+    distanceClass: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::distance-class.distance-class'
+    >;
     freightClass: Schema.Attribute.Relation<
       'oneToOne',
       'api::freight-classe.freight-classe'
@@ -1078,6 +1111,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::distance-class.distance-class': ApiDistanceClassDistanceClass;
       'api::freight-classe.freight-classe': ApiFreightClasseFreightClasse;
       'api::freight-rate.freight-rate': ApiFreightRateFreightRate;
       'api::price-table.price-table': ApiPriceTablePriceTable;
