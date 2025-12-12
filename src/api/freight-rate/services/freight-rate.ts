@@ -101,19 +101,38 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
   },
 
   /**
-   * Get applicable rates from price table
+   * Find distance class for estimated distance
+   */
+  async findDistanceClass(distance: number): Promise<any> {
+    const distanceClasses = await strapi
+      .service('api::distance-class.distance-class')
+      .find({
+        filters: {
+          minDistance: { $lte: distance },
+          maxDistance: { $gte: distance },
+        },
+      });
+
+    if (distanceClasses.results.length === 0) {
+      throw new Error(`No distance class found for distance ${distance}km`);
+    }
+
+    return distanceClasses.results[0];
+  },
+
+  /**
+   * Get applicable rates from price table based on freight class AND distance class
    */
   async getApplicableRates(
     freightClassId: string,
-    distance: number
+    distanceClassId: string
   ): Promise<any[]> {
     const rates = await strapi
       .service('api::price-table.price-table')
       .find({
         filters: {
           freightClass: freightClassId,
-          distanceMin: { $lte: distance },
-          distanceMax: { $gte: distance },
+          distanceClass: distanceClassId,
         },
       });
 
@@ -149,17 +168,24 @@ export default factories.createCoreService('api::freight-rate.freight-rate', {
       );
       strapi.log.info(`[Freight Rate] Estimated distance: ${distance} km`);
 
-      // Step 4: Get applicable rates
-      const applicableRates = await this.getApplicableRates(freightClassRecord.id, distance);
+      // Step 4: Find distance class for the estimated distance
+      const distanceClass = await this.findDistanceClass(distance);
+      strapi.log.info(`[Freight Rate] Mapped to distance class: ${distanceClass.distanceClass}`);
+
+      // Step 5: Get applicable rates based on both freight class AND distance class
+      const applicableRates = await this.getApplicableRates(
+        freightClassRecord.id,
+        distanceClass.id
+      );
       strapi.log.info(`[Freight Rate] Found ${applicableRates.length} applicable rates`);
 
       if (applicableRates.length === 0) {
         throw new Error(
-          `No rates found for freight class ${freightClass} and distance ${distance}km`
+          `No rates found for freight class ${freightClass} and distance class ${distanceClass.distanceClass}`
         );
       }
 
-      // Step 5: Get lowest rate (first result is usually lowest)
+      // Step 6: Get lowest rate (first result is usually lowest)
       const lowestRate = applicableRates[0];
       const basePrice = Number(lowestRate.pricePer100lbs);
 
