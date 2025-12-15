@@ -3,12 +3,184 @@
  * This controller does not use a content type - it's purely for calculations
  */
 
+import axios from 'axios';
+import moment from 'moment';
+import { inspect } from 'util';
+
 function estimatePostalCodeDistance(postal1: string, postal2: string): number {
   const combinedCode = `${postal1}${postal2}`;
   const hash = combinedCode.split('').reduce((acc, char) => {
     return acc + char.charCodeAt(0);
   }, 0);
-  return (hash % 4900) + 100; // 100-5000 km
+  return (hash % 4900) + 100;
+}
+
+type RateResponse = {
+  status: {
+    done: boolean;
+    total: number;
+    complete: number;
+  };
+  rates: {
+    service_id: string;
+    valid_until: {
+      year: number;
+      month: number;
+      day: number;
+    };
+    total: {
+      value: string;
+      currency: string;
+    };
+    base: {
+      value: string;
+      currency: string;
+    };
+    surcharger: {
+      type: string;
+      amount: {
+        value: string;
+        currency: string;
+      };
+    }[];
+    taxes: {
+      type: string;
+      amount: {
+        value: string;
+        currency: string;
+      };
+    }[];
+    transit_time_days: number;
+    carrier_name: string;
+    service_name: string;
+  }[];
+};
+
+async function getFreightComRates(
+  items: any[],
+  originPostalCode: string,
+  destinationPostalCode: string,
+  serviceId?: string
+): Promise<RateResponse['rates'] | null> {
+  try {
+    const apiKey = process.env.FREIGHTCOM_API_KEY;
+    if (!apiKey) {
+      strapi.log.warn('[Freight Calc] FREIGHTCOM_API_KEY not set, skipping freight API call');
+      return null;
+    }
+
+    const client = axios.create({
+      baseURL: 'https://external-api.freightcom.com',
+      headers: {
+        Authorization: apiKey,
+      },
+    });
+
+    const deliveryDate = moment().add(7, 'days');
+    const [day, month, year] = deliveryDate.format('DD MM YYYY').split(' ');
+
+    strapi.log.info(`[Freight Calc] Delivery date: ${deliveryDate.format('DD MM YYYY')}`);
+
+    if (!serviceId) {
+      strapi.log.warn('[Freight Calc] No serviceId provided, skipping freight API call');
+      // return null;
+    }
+
+    const rateData = {
+      // services: [serviceId],
+      details: {
+        origin: {
+          address: {
+            country: 'CA',
+            postal_code: originPostalCode,
+          },
+        },
+        destination: {
+          address: {
+            country: 'CA',
+            postal_code: destinationPostalCode,
+          },
+          ready_at: {
+            hour: 15,
+            minute: 6,
+          },
+          ready_until: {
+            hour: 15,
+            minute: 6,
+          },
+          signature_requirement: 'not-required',
+        },
+        expected_ship_date: {
+          year: Number(year),
+          month: Number(month),
+          day: Number(day),
+        },
+        packaging_type: 'pallet',
+        packaging_properties: {
+          pallet_type: 'ltl',
+          pallets: items.flatMap((item) => {
+            const pallets = [];
+            for (let i = 0; i < item.quantity; i++) {
+              pallets.push({
+                measurements: {
+                  weight: {
+                    unit: 'g',
+                    value: item.weight,
+                  },
+                  cuboid: {
+                    unit: 'mm',
+                    l: item.length,
+                    w: item.width,
+                    h: item.height,
+                  },
+                },
+                description: 'string',
+                freight_class: 'string',
+              });
+            }
+            return pallets;
+          }),
+        },
+      },
+    };
+
+    strapi.log.info(`[Freight Calc] Rate data: ${inspect(rateData, false, null, true)}`);
+
+    strapi.log.info('[Freight Calc] Sending rate request to freight API');
+    const rateId = await client.post('/rate', rateData).then((res) => res.data.request_id as string);
+    strapi.log.info(`[Freight Calc] Received rate id: ${rateId}`);
+
+    strapi.log.info('[Freight Calc] Waiting for rates to be available');
+    const rates: RateResponse['rates'] = await new Promise((resolve, reject) => {
+      const timer = setInterval(async () => {
+        try {
+          const response = await client.get('/rate/' + rateId).then((res) => res.data as RateResponse);
+          strapi.log.info(
+            `[Freight Calc] Waiting for rates - status: ${inspect(response.status, false, null, true)}`
+          );
+          if (response.status.done) {
+            clearInterval(timer);
+            resolve(response.rates);
+          }
+        } catch (error) {
+          clearInterval(timer);
+          reject(error);
+        }
+      }, 1000);
+
+      setTimeout(() => {
+        clearInterval(timer);
+        reject(new Error('Timeout waiting for freight rates'));
+      }, 30000);
+    });
+
+    strapi.log.info(`[Freight Calc] Received rates: ${inspect(rates, false, null, true)}`);
+
+    return rates;
+  } catch (error) {
+    strapi.log.error(`[Freight Calc] Error calling freight API: ${error.message}`);
+    return null;
+  }
 }
 
 export default {
@@ -26,12 +198,15 @@ export default {
    *   }, ...],
    *   destinationPostalCode: string (required),
    *   warehouseId?: string (optional, use specific warehouse),
-   *   originPostalCode?: string (optional, fallback if warehouse not found)
+   *   originPostalCode?: string (optional, fallback if warehouse not found),
+   *   freightServiceId?: string (optional, service ID for freight.com API comparison)
    * }
+   * 
+   * Returns both internal calculation and freight.com API rates for comparison
    */
   async calculate(ctx) {
     try {
-      const { items, destinationPostalCode, warehouseId, originPostalCode } = ctx.request.body;
+      const { items, destinationPostalCode, warehouseId, originPostalCode, freightServiceId } = ctx.request.body;
 
       if (!items || !Array.isArray(items) || items.length === 0) {
         return ctx.badRequest('Items array is required and must not be empty');
@@ -113,19 +288,47 @@ export default {
         return ctx.badRequest('Could not determine origin postal code');
       }
 
-      // Use the freight-calc service
       const freightCalcService = strapi.service('api::freight-calc.freight-calc');
-      const result = await freightCalcService.calculateRate({
+      const internalResult = await freightCalcService.calculateRate({
         items,
         distance,
       });
-      strapi.log.info(`[Freight Calc] result: ${JSON.stringify(result)}`);
+      strapi.log.info(`[Freight Calc] Internal result: ${JSON.stringify(internalResult)}`);
+
+      // Call freight API for comparison
+      const freightApiRates = await getFreightComRates(
+        items,
+        warehousePostalCode,
+        destinationPostalCode,
+        freightServiceId
+      );
 
       return {
         data: {
-          ...result,
-          selectedWarehouseId,
-          originPostalCode: warehousePostalCode,
+          internalCalculation: {
+            ...internalResult,
+            selectedWarehouseId,
+            originPostalCode: warehousePostalCode,
+          },
+          freightApiRates: freightApiRates || null,
+          comparison: freightApiRates && freightApiRates.length > 0
+            ? {
+                internalPrice: internalResult.lowestRate, // in cents
+                freightApiLowestPrice: Math.min(
+                  ...freightApiRates.map((rate) => parseFloat(rate.total.value) * 100) // Convert to cents
+                ),
+                freightApiRates: freightApiRates.map((rate) => ({
+                  serviceId: rate.service_id,
+                  serviceName: rate.service_name,
+                  carrierName: rate.carrier_name,
+                  totalPrice: parseFloat(rate.total.value), // in dollars
+                  totalPriceCents: parseFloat(rate.total.value) * 100, // in cents
+                  basePrice: parseFloat(rate.base.value), // in dollars
+                  currency: rate.total.currency,
+                  transitTimeDays: rate.transit_time_days,
+                })),
+              }
+            : null,
         },
       };
     } catch (error) {
