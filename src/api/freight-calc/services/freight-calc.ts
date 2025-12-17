@@ -4,7 +4,6 @@
  */
 
 interface CartItem {
-  id: string;
   productId: string;
   weight: number; // grams
   length: number; // mm
