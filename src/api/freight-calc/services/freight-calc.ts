@@ -89,33 +89,19 @@ export default {
     };
   },
 
-  async estimateDistance(
-    originPostalCode: string,
-    destinationPostalCode: string
-  ): Promise<number> {
-    // Simple hash-based estimation for demo purposes
-    // In production, use postal code database or geolocation API
-    const combinedCode = `${originPostalCode}${destinationPostalCode}`;
-    const hash = combinedCode.split('').reduce((acc, char) => {
-      return acc + char.charCodeAt(0);
-    }, 0);
-
-    const distance = ((hash % 4900) + 100);
-    return distance;
-  },
-
   async findDistanceClass(distance: number): Promise<DistanceClassRecord> {
+    const distanceRounded = Math.round(distance);
     const distanceClasses = await strapi
       .service('api::distance-class.distance-class')
       .find({
         filters: {
-          minDistance: { $lte: distance },
-          maxDistance: { $gte: distance },
+          minDistance: { $lte: distanceRounded },
+          maxDistance: { $gte: distanceRounded },
         },
       });
 
     if (distanceClasses.results.length === 0) {
-      throw new Error(`No distance class found for distance ${distance}km`);
+      throw new Error(`No distance class found for distance ${distanceRounded}km`);
     }
 
     return distanceClasses.results[0];
