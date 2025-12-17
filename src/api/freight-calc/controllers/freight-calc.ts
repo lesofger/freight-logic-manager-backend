@@ -440,7 +440,6 @@ export default {
       });
       strapi.log.info(`[Freight Calc] Internal result: ${JSON.stringify(internalResult)}`);
 
-      // Call freight API for comparison
       const freightApiRates = await getFreightComRates(
         items,
         warehousePostalCode,
@@ -458,17 +457,17 @@ export default {
           freightApiRates: freightApiRates || null,
           comparison: freightApiRates && freightApiRates.length > 0
             ? {
-                internalPrice: internalResult.lowestRate, // in cents
+                internalPrice: internalResult.lowestRate,
                 freightApiLowestPrice: Math.min(
-                  ...freightApiRates.map((rate) => parseFloat(rate.total.value) * 100) // Convert to cents
+                  ...freightApiRates.map((rate) => parseFloat(rate.total.value) * 100)
                 ),
                 freightApiRates: freightApiRates.map((rate) => ({
                   serviceId: rate.service_id,
                   serviceName: rate.service_name,
                   carrierName: rate.carrier_name,
-                  totalPrice: parseFloat(rate.total.value), // in dollars
-                  totalPriceCents: parseFloat(rate.total.value) * 100, // in cents
-                  basePrice: parseFloat(rate.base.value), // in dollars
+                  totalPrice: parseFloat(rate.total.value),
+                  totalPriceCents: parseFloat(rate.total.value) * 100,
+                  basePrice: parseFloat(rate.base.value),
                   currency: rate.total.currency,
                   transitTimeDays: rate.transit_time_days,
                 })),
