@@ -5,14 +5,74 @@
 
 import axios from 'axios';
 import moment from 'moment';
+import qs from 'qs';
 import { inspect } from 'util';
 
-function estimatePostalCodeDistance(postal1: string, postal2: string): number {
-  const combinedCode = `${postal1}${postal2}`;
-  const hash = combinedCode.split('').reduce((acc, char) => {
-    return acc + char.charCodeAt(0);
-  }, 0);
-  return (hash % 4900) + 100;
+type DistanceMatrix = {
+  destination_addresses: string[];
+  origin_addresses: string[];
+  rows: {
+    elements: {
+      distance: {
+        text: string;
+        value: number; // meters
+      };
+      duration: {
+        text: string;
+        value: number; // seconds
+      };
+      duration_in_traffic?: {
+        text: string;
+        value: number;
+      };
+      status: string;
+    }[];
+  }[];
+  status: string;
+};
+
+async function getGoogleDistance(originPostalCode: string, destinationPostalCode: string): Promise<number> {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    strapi.log.warn('[Freight Calc] GOOGLE_API_KEY not set, using fallback distance estimation');
+    return 500;
+  }
+
+  const queryData = {
+    departure_time: 'now',
+    origins: `${originPostalCode} Canada`,
+    destinations: `${destinationPostalCode} Canada`,
+    key: apiKey,
+  };
+
+  strapi.log.info(`[Freight Calc] Querying Google Maps API with ${inspect(queryData, false, null, true)}`);
+
+  try {
+    const distanceMatrix = await axios
+      .get<DistanceMatrix>(`https://maps.googleapis.com/maps/api/distancematrix/json?${qs.stringify(queryData)}`)
+      .then((res) => res.data);
+
+    strapi.log.info(`[Freight Calc] Google API response: ${inspect(distanceMatrix, false, null, true)}`);
+
+    if (distanceMatrix.status !== 'OK') {
+      strapi.log.error(`[Freight Calc] Google API error status: ${distanceMatrix.status}`);
+      throw new Error(`Google API error: ${distanceMatrix.status}`);
+    }
+
+    const element = distanceMatrix.rows[0]?.elements[0];
+    if (!element || element.status !== 'OK') {
+      strapi.log.error(`[Freight Calc] Google API element error: ${element?.status || 'No element'}`);
+      throw new Error(`Could not calculate distance: ${element?.status || 'No element'}`);
+    }
+
+    const distanceKm = element.distance.value / 1000;
+    strapi.log.info(`[Freight Calc] Distance calculated: ${distanceKm}km (${element.distance.text})`);
+
+    return distanceKm;
+  } catch (error) {
+    strapi.log.error(`[Freight Calc] Error calling Google Distance Matrix API: ${error.message}`);
+    throw error;
+  }
 }
 
 type RateResponse = {
@@ -232,8 +292,8 @@ export default {
           if (warehouse && warehouse.zipcode) {
             warehousePostalCode = warehouse.zipcode;
             selectedWarehouseId = warehouseId;
-            distance = estimatePostalCodeDistance(warehouse.zipcode, destinationPostalCode);
-            strapi.log.info(`[Freight Calc] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}`);
+            distance = await getGoogleDistance(warehouse.zipcode, destinationPostalCode);
+            strapi.log.info(`[Freight Calc] Using specified warehouse ${warehouseId} with postal code ${warehousePostalCode}, distance: ${distance}km`);
           } else {
             throw new Error(`Warehouse ${warehouseId} not found or has no zipcode`);
           }
@@ -251,26 +311,36 @@ export default {
             if (originPostalCode) {
               strapi.log.warn('[Freight Calc] No warehouses found, falling back to originPostalCode');
               warehousePostalCode = originPostalCode;
+              distance = await getGoogleDistance(originPostalCode, destinationPostalCode);
             } else {
               return ctx.badRequest('No warehouses found and originPostalCode not provided');
             }
           } else {
-            let closestWarehouse = warehouses[0];
-            let closestDistance = estimatePostalCodeDistance(closestWarehouse.zipcode, destinationPostalCode);
+            const warehouseDistances = await Promise.all(
+              warehouses.map(async (warehouse) => {
+                try {
+                  const dist = await getGoogleDistance(warehouse.zipcode, destinationPostalCode);
+                  return { warehouse, distance: dist };
+                } catch (err) {
+                  strapi.log.warn(`[Freight Calc] Could not calculate distance for warehouse ${warehouse.id}: ${err.message}`);
+                  return { warehouse, distance: Infinity };
+                }
+              })
+            );
 
-            for (const warehouse of warehouses) {
-              const distance = estimatePostalCodeDistance(warehouse.zipcode, destinationPostalCode);
-              if (distance < closestDistance) {
-                closestDistance = distance;
-                closestWarehouse = warehouse;
-              }
+            const closest = warehouseDistances.reduce((prev, curr) =>
+              curr.distance < prev.distance ? curr : prev
+            );
+
+            if (closest.distance === Infinity) {
+              throw new Error('Could not calculate distance for any warehouse');
             }
 
-            distance = closestDistance;
-            warehousePostalCode = closestWarehouse.zipcode;
-            selectedWarehouseId = String(closestWarehouse.id);
+            distance = closest.distance;
+            warehousePostalCode = closest.warehouse.zipcode;
+            selectedWarehouseId = String(closest.warehouse.id);
             strapi.log.info(
-              `[Freight Calc] Found closest warehouse ${closestWarehouse.id} (${closestWarehouse.name}) with distance ${closestDistance}km`
+              `[Freight Calc] Found closest warehouse ${closest.warehouse.id} (${closest.warehouse.name}) with distance ${distance}km`
             );
           }
         } catch (err) {
@@ -278,6 +348,12 @@ export default {
           if (originPostalCode) {
             strapi.log.warn('[Freight Calc] Falling back to originPostalCode');
             warehousePostalCode = originPostalCode;
+            try {
+              distance = await getGoogleDistance(originPostalCode, destinationPostalCode);
+            } catch (distErr) {
+              strapi.log.error(`[Freight Calc] Error calculating fallback distance: ${distErr.message}`);
+              return ctx.internalServerError('Failed to calculate shipping distance');
+            }
           } else {
             return ctx.internalServerError('Failed to determine warehouse location');
           }
